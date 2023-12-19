@@ -165,26 +165,32 @@ end
 
 function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; lastBatchElement=nothing, kwargs...)
 
-    neuralFMU.customCallbacksAfter = []
-    neuralFMU.customCallbacksBefore = []
+    if fmi2CanGetSetState(neuralFMU.fmu)
+        @assert !neuralFMU.fmu.executionConfig.instantiate "Batching not possible for auto-instanciating FMUs."
+        #if the fmu can get and set its state then do this before simulating the neuralFMU:
+	    neuralFMU.customCallbacksAfter = []
+	    neuralFMU.customCallbacksBefore = []
     
-    # STOP CALLBACK
-    if !isnothing(lastBatchElement)
-        stopcb = FunctionCallingCallback((u, t, integrator) -> copyState!(neuralFMU.fmu, lastBatchElement);
-                                    funcat=[batchElement.tStop])
-        push!(neuralFMU.customCallbacksAfter, stopcb)
-    end
+	    # STOP CALLBACK
+	    if !isnothing(lastBatchElement)
+	        stopcb = FunctionCallingCallback((u, t, integrator) -> copyState!(neuralFMU.fmu, lastBatchElement);
+	                                    funcat=[batchElement.tStop])
+	        push!(neuralFMU.customCallbacksAfter, stopcb)
+	    end
 
-    if isnothing(batchElement.initialState)
-        startcb = FunctionCallingCallback((u, t, integrator) -> copyState!(neuralFMU.fmu, batchElement);
-                funcat=[batchElement.tStart], func_start=true)
-        push!(neuralFMU.customCallbacksAfter, startcb)
+	    if isnothing(batchElement.initialState)
+	        startcb = FunctionCallingCallback((u, t, integrator) -> copyState!(neuralFMU.fmu, batchElement);
+	                funcat=[batchElement.tStart], func_start=true)
+	        push!(neuralFMU.customCallbacksAfter, startcb)
 
-        c = getCurrentComponent(neuralFMU.fmu)
-        FMI.fmi2SetContinuousStates(c, batchElement.xStart)
-        FMI.fmi2SetTime(c, batchElement.tStart)
+	        c = getCurrentComponent(neuralFMU.fmu)
+	        FMI.fmi2SetContinuousStates(c, batchElement.xStart)
+	        FMI.fmi2SetTime(c, batchElement.tStart)
+	    else
+	        pasteState!(neuralFMU.fmu, batchElement)
+	    end
     else
-        pasteState!(neuralFMU.fmu, batchElement)
+        @warn "This FMU can't set/get a FMU state. So discrete states can't be estimated together with the continuous solution." 
     end
 
     batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop); saveat=batchElement.saveat, kwargs...)
@@ -376,12 +382,6 @@ end
 
 function batchDataSolution(neuralFMU::NeuralFMU, x0_fun, train_t::AbstractArray{<:Real}, targets::AbstractArray; 
     batchDuration::Real=(train_t[end]-train_t[1]), indicesModel=1:length(targets[1]), plot::Bool=false, scalarLoss::Bool=true, solverKwargs...)
-
-    if fmi2CanGetSetState(neuralFMU.fmu)
-        @assert !neuralFMU.fmu.executionConfig.instantiate "Batching not possible for auto-instanciating FMUs."
-    else
-        @warn "This FMU can't set/get a FMU state. So discrete states can't be estimated together with the continuous solution." 
-    end
 
     batch = Array{FMIFlux.FMU2SolutionBatchElement,1}()
     
