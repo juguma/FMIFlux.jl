@@ -38,6 +38,7 @@ mutable struct FMU2SolutionBatchElement <: FMU2BatchElement
     xStart::Union{AbstractVector{<:fmi2Real}, Nothing}
     tStart::fmi2Real 
     tStop::fmi2Real 
+    parameters::Union{Dict{<:Any, <:Any}, Nothing}
 
     initialState::Union{fmi2FMUstate, Nothing}
     initialComponentState::fmi2ComponentState
@@ -59,6 +60,7 @@ mutable struct FMU2SolutionBatchElement <: FMU2BatchElement
         inst.xStart = nothing
         inst.tStart = -Inf
         inst.tStop = Inf
+        inst.parameters = nothing
 
         inst.initialState = nothing
         inst.initialEventInfo = nothing 
@@ -193,7 +195,7 @@ function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; l
         @warn "This FMU can't set/get a FMU state. So discrete states can't be estimated together with the continuous solution." 
     end
 
-    batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop); saveat=batchElement.saveat, kwargs...)
+    batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop); saveat=batchElement.saveat, parameters = batchElement.parameters, kwargs...)
 
     neuralFMU.customCallbacksBefore = []
     neuralFMU.customCallbacksAfter = []
@@ -381,7 +383,8 @@ function loss!(batchElement::FMU2EvaluationBatchElement, lossFct; logLoss::Bool=
 end
 
 function batchDataSolution(neuralFMU::NeuralFMU, x0_fun, train_t::AbstractArray{<:Real}, targets::AbstractArray; 
-    batchDuration::Real=(train_t[end]-train_t[1]), indicesModel=1:length(targets[1]), plot::Bool=false, scalarLoss::Bool=true, solverKwargs...)
+    batchDuration::Real=(train_t[end]-train_t[1]), indicesModel=1:length(targets[1]), plot::Bool=false, scalarLoss::Bool=true,
+    paramsfun = nothing, solverKwargs...)
 
     batch = Array{FMIFlux.FMU2SolutionBatchElement,1}()
     
@@ -419,6 +422,9 @@ function batchDataSolution(neuralFMU::NeuralFMU, x0_fun, train_t::AbstractArray{
         batch[i].targets = targets[iStart:iStop]
         
         batch[i].indicesModel = indicesModel
+        if paramsfun != nothing
+            batch[i].parameters = paramsfun(batch[i].tStart)
+	    end
     end
 
     for i in 1:numElements
