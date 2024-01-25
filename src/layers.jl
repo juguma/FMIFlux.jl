@@ -26,7 +26,7 @@ struct FMUParameterRegistrator{T}
             c.default_p = p
         end
 
-        return new(fmu, p_refs, p)
+        return new{T}(fmu, p_refs, p)
     end
 
     function FMUParameterRegistrator(fmu::FMU2, p_refs::fmi2ValueReferenceFormat, p::AbstractArray{T}) where {T}
@@ -48,6 +48,88 @@ function (l::FMUParameterRegistrator)(x)
 end
 
 Flux.@functor FMUParameterRegistrator (p, )
+
+### TimeLayer ###
+
+"""
+A neutral layer that calls a function `fct` with current FMU time as input.
+"""
+struct FMUTimeLayer{F, O}
+    fmu::FMU2
+    fct::F
+    offset::O
+
+    function FMUTimeLayer{F, O}(fmu::FMU2, fct::F, offset::O) where {F, O} 
+        return new{F, O}(fmu, fct, offset)
+    end
+
+    function FMUTimeLayer(fmu::FMU2, fct::F, offset::O) where {F, O} 
+        return FMUTimeLayer{F, O}(fmu, fct, offset)
+    end
+
+end
+export FMUTimeLayer
+
+function (l::FMUTimeLayer)(x)
+    
+    if hasCurrentComponent(l.fmu) 
+        c = getCurrentComponent(l.fmu) 
+        l.fct(c.default_t + l.offset[1])
+    end
+    
+    return x
+end
+
+Flux.@functor FMUTimeLayer (offset, )
+
+### ParameterRegistrator ###
+
+"""
+ToDo.
+"""
+struct ParameterRegistrator{T}
+    p::AbstractArray{T}
+   
+    function ParameterRegistrator{T}(p::AbstractArray{T}) where {T}
+        return new{T}(p)
+    end
+
+    function ParameterRegistrator(p::AbstractArray{T}) where {T}
+        return ParameterRegistrator{T}(p)
+    end
+end
+export ParameterRegistrator
+
+function (l::ParameterRegistrator)(x)
+    return x
+end
+
+Flux.@functor ParameterRegistrator (p, )
+
+### SimultaniousZeroCrossing ###
+
+"""
+Forces a simultaniuos zero crossing together with a given value by function.
+"""
+struct SimultaniousZeroCrossing{T, F}
+    m::T # scaling factor
+    fct::F
+   
+    function SimultaniousZeroCrossing{T, F}(m::T, fct::F) where {T, F}
+        return new{T, F}(m, fct)
+    end
+
+    function SimultaniousZeroCrossing(m::T, fct::F) where {T, F}
+        return SimultaniousZeroCrossing{T, F}(m, fct)
+    end
+end
+export SimultaniousZeroCrossing
+
+function (l::SimultaniousZeroCrossing)(x)
+    return x * l.m * l.fct()
+end
+
+Flux.@functor SimultaniousZeroCrossing (m, )
 
 ### SHIFTSCALE ###
 
