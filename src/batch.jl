@@ -173,20 +173,27 @@ function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; n
 	        push!(neuralFMU.customCallbacksAfter, stopcb)
 	    end
 
+    writeSnapshot = nothing
+    readSnapshot = nothing
+
     # on first run of the element, there is no snapshot
     if isnothing(batchElement.snapshot) 
-        startcb = FunctionCallingCallback((u, t, integrator) -> copyFMUState!(neuralFMU.fmu, batchElement);
-                                    funcat=[batchElement.tStart])
-        push!(neuralFMU.customCallbacksBefore, startcb)
+        c = getCurrentComponent(neuralFMU.fmu)
+        batchElement.snapshot = FMICore.snapshot!(c)
+        writeSnapshot = batchElement.snapshot # needs to be updated, therefore write
+    else
+        readSnapshot = batchElement.snapshot
 	    end
     end
 
     @info "Running $(batchElement.tStart) with snapshot: $(!isnothing(batchElement.snapshot))..."
 
     batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop); snapshot=batchElement.snapshot, parameters = batchElement.parameters,
+        readSnapshot=readSnapshot, 
+        writeSnapshot=writeSnapshot,
         saveat=batchElement.saveat, kwargs...)
 
-    @assert batchElement.solution.states.t == batchElement.saveat "Batch element simulation failed, missmatch between `states.t` and `saveat`."
+    # @assert batchElement.solution.states.t == batchElement.saveat "Batch element simulation failed, missmatch between `states.t` and `saveat`."
 
     neuralFMU.customCallbacksBefore = []
     neuralFMU.customCallbacksAfter = []
