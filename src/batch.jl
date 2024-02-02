@@ -161,15 +161,17 @@ end
 
 function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; nextBatchElement=nothing, kwargs...)
 
-    neuralFMU.customCallbacksAfter = []
-    neuralFMU.customCallbacksBefore = []
+    if fmi2CanGetSetState(neuralFMU.fmu)
+        #if the fmu can get and set its state then do this before simulating the neuralFMU:
+	    neuralFMU.customCallbacksAfter = []
+	    neuralFMU.customCallbacksBefore = []
     
-    # STOP CALLBACK
+	    # STOP CALLBACK
     if !isnothing(nextBatchElement) 
         stopcb = FunctionCallingCallback((u, t, integrator) -> copyFMUState!(neuralFMU.fmu, nextBatchElement);
-                                    funcat=[batchElement.tStop])
-        push!(neuralFMU.customCallbacksAfter, stopcb)
-    end
+	                                    funcat=[batchElement.tStop])
+	        push!(neuralFMU.customCallbacksAfter, stopcb)
+	    end
 
     writeSnapshot = nothing
     readSnapshot = nothing
@@ -181,6 +183,7 @@ function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; n
         writeSnapshot = batchElement.snapshot # needs to be updated, therefore write
     else
         readSnapshot = batchElement.snapshot
+	    end
     end
 
     @info "Running $(batchElement.tStart) with snapshot: $(!isnothing(batchElement.snapshot))..."
