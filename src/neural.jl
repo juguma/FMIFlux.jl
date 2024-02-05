@@ -797,7 +797,7 @@ function stepCompleted(nfmu::ME_NeuralFMU, c::FMU2Component, x, t, integrator, t
 
     if !isnothing(c.progressMeter)
         t = unsense(t)
-        dt = unsense(integrator.tprev) - unsense(integrator.t)
+        dt = unsense(integrator.t) - unsense(integrator.tprev)
         events = length(c.solution.events)
         steps = c.solution.evals_stepcompleted
         simLen = tStop-tStart
@@ -986,6 +986,8 @@ function CS_NeuralFMU(fmu::FMU2,
     nfmu.fmu = fmu
     nfmu.model = model 
     nfmu.tspan = tspan
+
+    nfmu.p, nfmu.re = Flux.destructure(nfmu.model)
     
     return nfmu
 end
@@ -1007,6 +1009,8 @@ function CS_NeuralFMU(fmus::Vector{<:FMU2},
     nfmu.fmu = fmus
     nfmu.model = model 
     nfmu.tspan = tspan
+
+    nfmu.p, nfmu.re = Flux.destructure(nfmu.model)
    
     return nfmu
 end
@@ -1515,13 +1519,15 @@ function Flux.params(nfmu::ME_NeuralFMU; destructure::Bool=false)
     return Flux.params(nfmu.p)
 end
 
-function Flux.params(nfmu::CS_NeuralFMU; destructure::Bool=true)
+function Flux.params(nfmu::CS_NeuralFMU; destructure::Bool=false) # true)
     if destructure 
         nfmu.p, nfmu.re = Flux.destructure(nfmu.model)
-        return Flux.params(nfmu.p)
-    else
-        return Flux.params(nfmu.model)
+        
+    # else
+    #     return Flux.params(nfmu.model)
     end
+
+    return Flux.params(nfmu.p)
 end
 
 function computeGradient!(jac, loss, params, gradient::Symbol, chunk_size::Union{Symbol, Int}, multiObjective::Bool)
@@ -1639,8 +1645,7 @@ function trainStep(loss, params, gradient, chunk_size, optim::FMIFlux.AbstractOp
                 params[j] .-= step
 
                 if printStep
-                    @info "Grad: Min = $(min(abs.(grad)...))   Max = $(max(abs.(grad)...))"
-                    @info "Step: Min = $(min(abs.(step)...))   Max = $(max(abs.(step)...))"
+                    @info "Step: min(abs()) = $(min(abs.(step)...))   max(abs()) = $(max(abs.(step)...))"
                 end
                 
             end
