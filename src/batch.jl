@@ -161,34 +161,34 @@ end
 
 function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; nextBatchElement=nothing, kwargs...)
 
+    writeSnapshot = nothing
+    readSnapshot = nothing
+
     if fmi2CanGetSetState(neuralFMU.fmu)
         #if the fmu can get and set its state then do this before simulating the neuralFMU:
 	    neuralFMU.customCallbacksAfter = []
 	    neuralFMU.customCallbacksBefore = []
     
-	    # STOP CALLBACK
-    if !isnothing(nextBatchElement) 
-        stopcb = FunctionCallingCallback((u, t, integrator) -> copyFMUState!(neuralFMU.fmu, nextBatchElement);
-	                                    funcat=[batchElement.tStop])
-	        push!(neuralFMU.customCallbacksAfter, stopcb)
+            # STOP CALLBACK
+        if !isnothing(nextBatchElement) 
+            stopcb = FunctionCallingCallback((u, t, integrator) -> copyFMUState!(neuralFMU.fmu, nextBatchElement);
+                                            funcat=[batchElement.tStop])
+                push!(neuralFMU.customCallbacksAfter, stopcb)
 	    end
-
-    writeSnapshot = nothing
-    readSnapshot = nothing
-
-    # on first run of the element, there is no snapshot
-    if isnothing(batchElement.snapshot) 
-        c = getCurrentComponent(neuralFMU.fmu)
-        batchElement.snapshot = FMICore.snapshot!(c)
-        writeSnapshot = batchElement.snapshot # needs to be updated, therefore write
-    else
-        readSnapshot = batchElement.snapshot
-	    end
+        
+        # on first run of the element, there is no snapshot
+        if isnothing(batchElement.snapshot) 
+            c = getCurrentComponent(neuralFMU.fmu)
+            batchElement.snapshot = FMICore.snapshot!(c)
+            writeSnapshot = batchElement.snapshot # needs to be updated, therefore write
+        else
+            readSnapshot = batchElement.snapshot
+            end
     end
 
     @info "Running $(batchElement.tStart) with snapshot: $(!isnothing(batchElement.snapshot))..."
 
-    batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop); snapshot=batchElement.snapshot, parameters = batchElement.parameters,
+    batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop);parameters = batchElement.parameters,
         readSnapshot=readSnapshot, 
         writeSnapshot=writeSnapshot,
         saveat=batchElement.saveat, kwargs...)
