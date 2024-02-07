@@ -223,6 +223,41 @@ function initialize!(scheduler::BatchScheduler; runkwargs...)
     end
 end
 
+function setNextBatch!(scheduler::BatchScheduler, nextIndex; print::Bool=true)
+    @debug "setNextBatch!"
+    lastIndex = scheduler.elementIndex
+    scheduler.step += 1
+
+    scheduler.elementIndex = nextIndex
+
+    # max/avg error 
+    num = length(scheduler.batch)
+    losssum = 0.0
+    avgsum = 0.0
+    maxe = 0.0
+    for i in 1:num
+        l = nominalLoss(scheduler.batch[i])
+        l = l == Inf ? 0.0 : l
+        
+        losssum += l
+        avgsum += l / num
+
+        if l > maxe 
+            maxe = l 
+        end
+    end
+    push!(scheduler.losses, losssum)
+    
+    if print
+        scheduler.printMsg = "AVG: $(roundToLength(avgsum, 8)) | MAX: $(roundToLength(maxe, 8)) | SUM: $(roundToLength(losssum, 8))"
+        @info scheduler.printMsg
+    end
+
+    if scheduler.plotStep > 0 && scheduler.step % scheduler.plotStep == 0
+        plot(scheduler, lastIndex)
+    end    
+end 
+
 function update!(scheduler::BatchScheduler; print::Bool=true)
 
     lastIndex = scheduler.elementIndex

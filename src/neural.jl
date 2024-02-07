@@ -290,8 +290,8 @@ end
 function condition!(nfmu::ME_NeuralFMU, c::FMU2Component, out, x, t, integrator, handleEventIndicators) 
 
     @assert getCurrentComponent(nfmu.fmu) == c "Thread `$(Threads.threadid())` wants to evaluate wrong component!"
-    @assert c.state == fmi2ComponentStateContinuousTimeMode "condition!(...):\n" * FMICore.ERR_MSG_CONT_TIME_MODE
-
+    #@assert c.state == fmi2ComponentStateContinuousTimeMode "condition!(...):\n" * FMICore.ERR_MSG_CONT_TIME_MODE
+    @assert c.state == fmi2ComponentStateContinuousTimeMode "condition!(...):\n" * "t: $t \n" * FMICore.ERR_MSG_CONT_TIME_MODE# x: $x \n out: $out \n"
     # [ToDo] Evaluate on light-weight model (sub-model) without fmi2GetXXX or similar and the bottom ANN.
     #        Basically only the layers from very top to FMU need to be evaluated here.
 
@@ -1675,6 +1675,36 @@ function trainStep(loss, params, gradient, chunk_size, optim::FMIFlux.AbstractOp
 
 end
 
+function proposeTrainStep(loss, params, gradient, chunk_size, optim::FMIFlux.AbstractOptimiser, printStep, proceed_on_assert, multiObjective)
+
+    global lk_TrainApply
+    
+    try               
+        #for j in 1:length(params)
+        j=1
+            step = FMIFlux.apply!(optim, params[j])#<modifies optim.grad_buffer (and maybe more)
+            lock(lk_TrainApply) do                
+                #params[j] .-= step
+                if printStep
+                   # @info "Grad: Min = $(min(abs.(grad)...))   Max = $(max(abs.(grad)...))"
+                    @info "Step: Min = $(min(abs.(step)...))   Max = $(max(abs.(step)...))"
+                end 
+            end  
+        #end 
+
+    catch e
+
+        if proceed_on_assert
+            msg = "$(e)"
+            msg = length(msg) > 4096 ? first(msg, 4096) * "..." : msg
+            @error "Training asserted, but continuing: $(msg)"
+        else
+            throw(e)
+        end
+    end
+    return optim.grad_buffer #<-that's where gradient-step is saved (or not if apply! fails)
+end
+
 """
 
     train!(loss, params::Union{Flux.Params, Zygote.Params}, data, optim::Flux.Optimise.AbstractOptimiser; gradient::Symbol=:Zygote, cb=nothing, chunk_size::Integer=64, printStep::Bool=false)
@@ -1719,7 +1749,8 @@ function _train!(loss,
     data, 
     optim::FMIFlux.AbstractOptimiser; 
     gradient::Symbol=:ReverseDiff, 
-    cb=nothing, chunk_size::Union{Integer, Symbol}=:auto_fmiflux, 
+    scheduler,#::FMIFlux.BatchScheduler,
+    chunk_size::Union{Integer, Symbol}=:auto_fmiflux, 
     printStep::Bool=false, 
     proceed_on_assert::Bool=false, 
     multiThreading::Bool=false, 
@@ -1734,12 +1765,41 @@ function _train!(loss,
         @warn "train!(...): Multi-threading is set via flag `multiThreading=true`, but this Julia process does not have multiple threads. This will not result in a speed-up. Please spawn Julia in multi-thread mode to speed-up training."
     end
 
-    _trainStep = (i,) -> trainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, cb, multiObjective)
+    _trainStep = (i,) -> trainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, ()->update!(scheduler), multiObjective)
+    #not yet used: _proposeTrainStep = (i,) -> proposeTrainStep!(step,loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, cb, multiObjective)
 
     if multiThreading
         ThreadPools.qforeach(_trainStep, 1:length(data))
     else
-        foreach(_trainStep, 1:length(data))
+        for i in 1:length(data)
+            stp = proposeTrainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, multiObjective)
+            successful = false
+            k = 0
+            delta = 0.0
+            nextIndex = scheduler.elementIndex
+            while !successful && k<5
+                    delta += ((k==0) ? 1.0 : -9.0/10.0^k)
+                    params[1] .-= ((k==0) ? 1.0 : -9.0/10.0^k)*stp
+                    k +=1
+                try     
+                    if scheduler.applyStep > 0 && scheduler.step % scheduler.applyStep == 0
+                        nextIndex = apply!(scheduler) #<-better name would be prepareNextUpdate!
+                        #<-that is the step which could actually fail
+                    end
+                    successful = true
+                catch e
+                    if proceed_on_assert
+                        msg = "$(e)"
+                        msg = length(msg) > 4096 ? first(msg, 4096) * "..." : msg
+                        @error "Failed to run batches with new parameter values (delta = $(delta)). Re-try with smaller parameter modification. \nError msg.: $(msg)"
+                    else
+                        throw(e)
+                    end
+                end
+            end
+            setNextBatch!(scheduler, nextIndex; print=true) 
+        end 
+     #   foreach(_trainStep, 1:length(data))
     end
 
 end
