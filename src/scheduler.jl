@@ -437,15 +437,16 @@ function apply!(scheduler::LossAccumulationScheduler; print::Bool=true)
 
     num = length(scheduler.batch)
     for i in 1:num
-
-        l = (nominalLoss(scheduler.batch[i]) != Inf ? nominalLoss(scheduler.batch[i]) : 0.0)
-        
         if updateAll
             FMIFlux.run!(scheduler.neuralFMU, scheduler.batch[i]; scheduler.runkwargs...)
             FMIFlux.loss!(scheduler.batch[i], scheduler.lossFct; logLoss=scheduler.logLoss)
-            l = nominalLoss(scheduler.batch[i])
         end
+    end
 
+    # find largest accumulated loss
+    #->this part is only entered, if all run!s an loss! calcs were successful
+    for i in 1:num
+        l = (nominalLoss(scheduler.batch[i]) != Inf ? nominalLoss(scheduler.batch[i]) : 0.0)
         scheduler.lossAccu[i] += l
 
         losssum += l
@@ -454,10 +455,7 @@ function apply!(scheduler::LossAccumulationScheduler; print::Bool=true)
         if l > maxe
             maxe = l 
         end
-    end
 
-    # find largest accumulated loss
-    for i in 1:num
         if scheduler.lossAccu[i] > scheduler.lossAccu[nextind]
             nextind = i
         end
