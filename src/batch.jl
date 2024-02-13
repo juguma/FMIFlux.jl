@@ -487,6 +487,14 @@ function batchDataSolution(neuralFMU::NeuralFMU, x0_fun, train_t, targets;
     return batch
 end
 
+function runBatches!(neuralFMU,batch:: Array{FMIFlux.FMU2SolutionBatchElement,1}; runkwargs...)
+    for i in 1:length(batch)
+      FMIFlux.run!(neuralFMU, batch[i]; runkwargs...)  
+    end
+end
+
+    
+
 function batchDataEvaluation(train_t::AbstractArray{<:Real}, targets::AbstractArray, features::Union{AbstractArray, Nothing}=nothing; 
     batchDuration::Real=(train_t[end]-train_t[1]), indicesModel=1:length(targets[1]), plot::Bool=false, round_digits=3, scalarLoss::Bool=true)
 

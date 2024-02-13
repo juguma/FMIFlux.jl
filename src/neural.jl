@@ -1287,7 +1287,7 @@ function (nfmu::ME_NeuralFMU)(x_start::Union{Array{<:Real}, Nothing} = nfmu.x0,
     prob = ODEProblem{true}(ff, nfmu.x0, nfmu.tspan, p)
 
     if isnothing(sensealg)
-        if isimplicit(solver)
+        if !isnothing(solver) && isimplicit(solver)
             @assert !(alg_autodiff(solver) isa AutoForwardDiff) "Implicit solver using `autodiff=true` detected for NeuralFMU.\nThis is currently not supported, please use `autodiff=false` as solver keyword.\nExample: `Rosenbrock23(autodiff=false)` instead of `Rosenbrock23()`."
 
             logWarning(nfmu.fmu, "Implicit solver detected for NeuralFMU.\nContinuous adjoint method is applied, which requires solving backward in time.\nThis might be not supported by every FMU.", 1)
@@ -1675,6 +1675,10 @@ function trainStep(loss, params, gradient, chunk_size, optim::FMIFlux.AbstractOp
 
 end
 
+#actually the old trainstep:
+#- without the callback part 
+#- without modifiying the params
+#- but instead with returning the step
 function proposeTrainStep(loss, params, gradient, chunk_size, optim::FMIFlux.AbstractOptimiser, printStep, proceed_on_assert, multiObjective)
 
     global lk_TrainApply
@@ -1749,12 +1753,14 @@ function _train!(loss,
     data, 
     optim::FMIFlux.AbstractOptimiser; 
     gradient::Symbol=:ReverseDiff, 
-    scheduler,#::FMIFlux.BatchScheduler,
+    updateCB = nothing,
+    testCB = nothing,#::FMIFlux.BatchScheduler,
     chunk_size::Union{Integer, Symbol}=:auto_fmiflux, 
     printStep::Bool=false, 
     proceed_on_assert::Bool=false, 
     multiThreading::Bool=false, 
     multiObjective::Bool=false)
+     @info "_train!(params et al)"
 
     if length(params) <= 0 || length(params[1]) <= 0 
         @warn "train!(...): Empty parameter array, training on an empty parameter array doesn't make sense."
@@ -1772,19 +1778,26 @@ function _train!(loss,
         ThreadPools.qforeach(_trainStep, 1:length(data))
     else
         for i in 1:length(data)
+            #propose step
             stp = proposeTrainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, multiObjective)
+            @info "proposeTrainStep succeeded with step: $(stp)"
+            #make tests with new step (when errored, reduce step)
             successful = false
             k = 0
             delta = 0.0
-            nextIndex = scheduler.elementIndex
             while !successful && k<5
                     delta += ((k==0) ? 1.0 : -9.0/10.0^k)
                     params[1] .-= ((k==0) ? 1.0 : -9.0/10.0^k)*stp
                     k +=1
-                try     
-                    if scheduler.applyStep > 0 && scheduler.step % scheduler.applyStep == 0
-                        nextIndex = apply!(scheduler) #<-better name would be prepareNextUpdate!
-                        #<-that is the step which could actually fail
+                try 
+                    if testCB != nothing 
+                        if isa(testCB, AbstractArray)
+                            for _cb in testCB 
+                                _cb()
+                            end
+                        else
+                            testCB()
+                        end
                     end
                     successful = true
                 catch e
@@ -1797,7 +1810,12 @@ function _train!(loss,
                     end
                 end
             end
-            setNextBatch!(scheduler, nextIndex; print=true) 
+            @info "succeeded tests"
+
+            #prepare next step
+            updateCB()
+
+            #setNextBatch!(scheduler, nextIndex; print=true) 
         end 
      #   foreach(_trainStep, 1:length(data))
     end

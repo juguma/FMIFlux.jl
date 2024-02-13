@@ -102,7 +102,7 @@ export WorstElementScheduler, WorstGrowScheduler, RandomScheduler, SequentialSch
 export initialize!, update!
 
 # batch.jl 
-export batchDataSolution, batchDataEvaluation
+export batchDataSolution, batchDataEvaluation, runBatches!
 
 # layers.jl
 # >>> layers are exported inside the file itself
