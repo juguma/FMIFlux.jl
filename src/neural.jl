@@ -1753,7 +1753,7 @@ function _train!(loss,
     data, 
     optim::FMIFlux.AbstractOptimiser; 
     gradient::Symbol=:ReverseDiff, 
-    updateCB = nothing,
+    cb = nothing,
     testCB = nothing,#::FMIFlux.BatchScheduler,
     chunk_size::Union{Integer, Symbol}=:auto_fmiflux, 
     printStep::Bool=false, 
@@ -1771,7 +1771,7 @@ function _train!(loss,
         @warn "train!(...): Multi-threading is set via flag `multiThreading=true`, but this Julia process does not have multiple threads. This will not result in a speed-up. Please spawn Julia in multi-thread mode to speed-up training."
     end
 
-    _trainStep = (i,) -> trainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, ()->update!(scheduler), multiObjective)
+    _trainStep = (i,) -> trainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, cb, multiObjective)
     #not yet used: _proposeTrainStep = (i,) -> proposeTrainStep!(step,loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, cb, multiObjective)
 
     if multiThreading
@@ -1812,10 +1812,16 @@ function _train!(loss,
             end
             @info "succeeded tests"
 
-            #prepare next step
-            updateCB()
-
-            #setNextBatch!(scheduler, nextIndex; print=true) 
+            #callbacks after successful step
+            if cb != nothing 
+                if isa(cb, AbstractArray)
+                    for _cb in cb 
+                        _cb()
+                    end
+                else
+                    cb()
+                end
+            end
         end 
      #   foreach(_trainStep, 1:length(data))
     end
