@@ -1679,7 +1679,7 @@ end
 #- without the callback part 
 #- without modifiying the params
 #- but instead with returning the step
-function proposeTrainStep(loss, params, gradient, chunk_size, optim::FMIFlux.AbstractOptimiser, printStep, proceed_on_assert, multiObjective)
+function trainStepWithTest(loss, params, gradient, chunk_size, optim::FMIFlux.AbstractOptimiser, printStep, proceed_on_assert, testCB, cb, multiObjective)
 
     global lk_TrainApply
     
@@ -1706,7 +1706,50 @@ function proposeTrainStep(loss, params, gradient, chunk_size, optim::FMIFlux.Abs
             throw(e)
         end
     end
-    return optim.grad_buffer #<-that's where gradient-step is saved (or not if apply! fails)
+
+    stp = optim.grad_buffer
+    @debug "step calculation succeeded with step: $(stp)"
+
+    #make tests with new step (when errored, reduce step)
+    if testCB != nothing
+    #make some tests before you accept the step
+        k = 0
+        delta = 0.0
+        successful = false
+        while !successful
+            delta += ((k==0) ? 1.0 : -9.0/10.0^k)
+            params[1] .-= ((k==0) ? 1.0 : -9.0/10.0^k)*stp
+            k +=1
+            if isa(testCB, AbstractArray)
+                for _cb in testCB
+                    successful = _cb()
+                    if !successful
+                        break
+                    end
+                end
+            else
+                successful = testCB()
+            end
+            if !successful && proceed_on_assert && k<5
+                @error  "Failed to run tests with new parameter values (delta = $(delta)). Re-try with smaller parameter modification."
+            end
+            @assert !(!successful && (!proceed_on_assert || k==5)) "Failed to run tests with new parameter values (delta = $(delta)). Aborting the training."
+        end
+        @debug "succeeded tests"  
+    else
+        params[1] .-= stp
+    end
+
+    #callbacks after successful step
+    if cb != nothing 
+        if isa(cb, AbstractArray)
+            for _cb in cb 
+                _cb()
+            end
+        else
+            cb()
+        end
+    end
 end
 
 """
@@ -1772,58 +1815,12 @@ function _train!(loss,
     end
 
     _trainStep = (i,) -> trainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, cb, multiObjective)
-    #not yet used: _proposeTrainStep = (i,) -> proposeTrainStep!(step,loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, cb, multiObjective)
+    _trainStepWithTest = (i,) -> trainStepWithTest(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, testCB, cb, multiObjective)
 
     if multiThreading
         ThreadPools.qforeach(_trainStep, 1:length(data))
     else
-        for i in 1:length(data)
-            #propose step
-            stp = proposeTrainStep(loss, params, gradient, chunk_size, optim, printStep, proceed_on_assert, multiObjective)
-            @info "proposeTrainStep succeeded with step: $(stp)"
-            #make tests with new step (when errored, reduce step)
-            successful = false
-            k = 0
-            delta = 0.0
-            while !successful && k<5
-                    delta += ((k==0) ? 1.0 : -9.0/10.0^k)
-                    params[1] .-= ((k==0) ? 1.0 : -9.0/10.0^k)*stp
-                    k +=1
-                try 
-                    if testCB != nothing 
-                        if isa(testCB, AbstractArray)
-                            for _cb in testCB 
-                                _cb()
-                            end
-                        else
-                            testCB()
-                        end
-                    end
-                    successful = true
-                catch e
-                    if proceed_on_assert
-                        msg = "$(e)"
-                        msg = length(msg) > 4096 ? first(msg, 4096) * "..." : msg
-                        @error "Failed to run batches with new parameter values (delta = $(delta)). Re-try with smaller parameter modification. \nError msg.: $(msg)"
-                    else
-                        throw(e)
-                    end
-                end
-            end
-            @info "succeeded tests"
-
-            #callbacks after successful step
-            if cb != nothing 
-                if isa(cb, AbstractArray)
-                    for _cb in cb 
-                        _cb()
-                    end
-                else
-                    cb()
-                end
-            end
-        end 
-     #   foreach(_trainStep, 1:length(data))
+        foreach(_trainStepWithTest, 1:length(data))
     end
 
 end
