@@ -194,7 +194,7 @@ function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; n
             batchElement.snapshot = FMICore.snapshot!(c)
             writeSnapshot = batchElement.snapshot # needs to be updated, therefore write
         else
-            readSnapshot = batchElement.snapshot
+        readSnapshot = batchElement.snapshot
             end
     end
 
