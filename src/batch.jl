@@ -200,7 +200,8 @@ function run!(neuralFMU::ME_NeuralFMU, batchElement::FMU2SolutionBatchElement; n
 
     @debug "Running $(batchElement.tStart) with snapshot: $(!isnothing(batchElement.snapshot))..."
 
-    batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop);parameters = batchElement.parameters,
+    batchElement.solution = neuralFMU(batchElement.xStart, (batchElement.tStart, batchElement.tStop);
+        parameters = isnothing(neuralFMU.parameters) ?  batchElement.parameters : isnothing(batchElement.parameters) ? neuralFMU.parameters : merge(neuralFMU.parameters, batchElement.parameters),
         readSnapshot=readSnapshot, 
         writeSnapshot=writeSnapshot,
         saveat=batchElement.saveat, kwargs...)
